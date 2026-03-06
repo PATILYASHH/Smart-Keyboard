@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'keyboard/keyboard_widget.dart';
 import 'platform/keyboard_channel.dart';
+import 'spell/spell_corrector.dart';
 
 /// Entry point for the Flutter keyboard UI.
 ///
@@ -32,6 +33,15 @@ class _KeyboardAppState extends State<KeyboardApp> {
     super.initState();
     _channel = KeyboardChannel();
     _channel.initialize();
+    _loadSpellCorrector();
+  }
+
+  /// Loads the bundled dictionary and attaches the [SpellCorrector] to the
+  /// channel so that offline suggestions are available immediately after
+  /// the keyboard is shown for the first time.
+  Future<void> _loadSpellCorrector() async {
+    final corrector = await SpellCorrector.fromAsset();
+    _channel.setSpellCorrector(corrector);
   }
 
   @override
