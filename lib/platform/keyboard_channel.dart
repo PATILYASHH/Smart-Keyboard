@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import '../spell/spell_corrector.dart';
 
 /// Modifier key flags tracked by the keyboard UI.
 enum KeyboardModifier { shift, capsLock, alt, symbol }
@@ -63,10 +64,38 @@ class KeyboardChannel {
   InputFieldInfo? _currentField;
   final Set<KeyboardModifier> _activeModifiers = {};
 
+  /// The spell corrector used to generate offline suggestions.
+  ///
+  /// Set via [setSpellCorrector] after loading the dictionary from assets.
+  /// When `null` the channel relies entirely on Kotlin-side suggestions.
+  SpellCorrector? _spellCorrector;
+
+  /// The word currently being composed (updated on every [commitKey] call).
+  String _currentWord = '';
+
   List<String> get suggestions => List.unmodifiable(_suggestions);
   InputFieldInfo? get currentField => _currentField;
   Set<KeyboardModifier> get activeModifiers =>
       Set.unmodifiable(_activeModifiers);
+
+  // ---------------------------------------------------------------------------
+  // Spell corrector
+  // ---------------------------------------------------------------------------
+
+  /// Attaches an offline [SpellCorrector] to this channel.
+  ///
+  /// Once set, [commitKey] will update an internal word buffer and push local
+  /// spell-correction suggestions whenever the user is mid-word.  Suggestions
+  /// pushed by the Kotlin side (via [_handleSuggestionsCall]) always override
+  /// local ones so that server-side prediction takes precedence when online.
+  void setSpellCorrector(SpellCorrector corrector) {
+    _spellCorrector = corrector;
+  }
+
+  /// Returns the word currently being typed (empty between words).
+  ///
+  /// Exposed primarily for testing.
+  String get currentWord => _currentWord;
 
   // ---------------------------------------------------------------------------
   // Listeners
@@ -118,10 +147,16 @@ class KeyboardChannel {
   ///
   /// Returns a [Map] containing `character`, `isShift`, `isCaps`, `isAlt`, and
   /// `timestampMs` — matching the Kotlin [KeyboardEngine.buildKeyPressPayload].
+  ///
+  /// Side-effect: updates the internal word buffer and fires offline
+  /// spell-correction suggestions via [_pushLocalSuggestions] when a
+  /// [SpellCorrector] is attached.
   Future<Map<Object?, Object?>> commitKey(
     String character, {
     Set<KeyboardModifier> modifiers = const {},
   }) async {
+    _updateWordBuffer(character);
+
     final result = await _keyInputChannel.invokeMethod<Map<Object?, Object?>>(
       'commitKey',
       {
@@ -132,21 +167,33 @@ class KeyboardChannel {
     return result ?? const {};
   }
 
-  /// Tells Kotlin to delete the character before the cursor.
-  Future<void> deleteBackward() =>
-      _keyInputChannel.invokeMethod<void>('deleteBackward');
+  /// Tells Kotlin to delete the character before the cursor and removes the
+  /// last character from the internal word buffer.
+  Future<void> deleteBackward() {
+    if (_currentWord.isNotEmpty) {
+      _currentWord = _currentWord.substring(0, _currentWord.length - 1);
+      _pushLocalSuggestions();
+    }
+    return _keyInputChannel.invokeMethod<void>('deleteBackward');
+  }
 
   /// Tells Kotlin to delete the entire word immediately before the cursor.
   ///
   /// The Kotlin side reads the text before the cursor, computes the previous
   /// word boundary, and calls [InputConnection.deleteSurroundingText] with the
   /// appropriate character count.
-  Future<void> deleteWord() =>
-      _keyInputChannel.invokeMethod<void>('deleteWord');
+  Future<void> deleteWord() {
+    _currentWord = '';
+    _pushLocalSuggestions();
+    return _keyInputChannel.invokeMethod<void>('deleteWord');
+  }
 
   /// Commits the selected [word] suggestion (Kotlin will append a space).
-  Future<void> commitSuggestion(String word) =>
-      _keyInputChannel.invokeMethod<void>('commitSuggestion', {'word': word});
+  Future<void> commitSuggestion(String word) {
+    _currentWord = '';
+    _pushLocalSuggestions();
+    return _keyInputChannel.invokeMethod<void>('commitSuggestion', {'word': word});
+  }
 
   /// Sends a raw Android key code to Kotlin.
   Future<void> sendKeyCode(int keyCode) =>
@@ -195,6 +242,7 @@ class KeyboardChannel {
         }
       case 'inputFinished':
         _currentField = null;
+        _currentWord = '';
         _suggestions = const [];
         for (final l in _inputStateListeners) {
           l(null);
@@ -202,6 +250,46 @@ class KeyboardChannel {
         for (final l in _suggestionListeners) {
           l(const []);
         }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Word buffer + local spell correction
+  // ---------------------------------------------------------------------------
+
+  /// Updates [_currentWord] based on [character] and pushes offline
+  /// suggestions when a [SpellCorrector] is attached.
+  void _updateWordBuffer(String character) {
+    if (_spellCorrector == null) return;
+
+    if (character.isEmpty) return;
+
+    // Space, newline, or punctuation → word boundary: reset buffer.
+    final isWordChar = RegExp(r"[a-zA-Z']").hasMatch(character);
+    if (!isWordChar) {
+      _currentWord = '';
+    } else {
+      _currentWord += character.toLowerCase();
+    }
+    _pushLocalSuggestions();
+  }
+
+  /// Computes offline spell-correction suggestions for [_currentWord] and
+  /// notifies [_suggestionListeners].
+  ///
+  /// Called only when [_spellCorrector] is set.  Kotlin-side suggestions
+  /// received via [_handleSuggestionsCall] will overwrite these.
+  void _pushLocalSuggestions() {
+    final corrector = _spellCorrector;
+    if (corrector == null) return;
+
+    final word = _currentWord;
+    final newSuggestions =
+        word.length >= 2 ? corrector.suggest(word) : const <String>[];
+
+    _suggestions = newSuggestions;
+    for (final l in _suggestionListeners) {
+      l(_suggestions);
     }
   }
 
