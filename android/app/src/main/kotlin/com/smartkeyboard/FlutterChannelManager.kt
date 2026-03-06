@@ -45,7 +45,8 @@ class FlutterChannelManager(
     private val suggestionManager: SuggestionManager,
     private val onCommitText: (String) -> Unit,
     private val onSendKeyEvent: (KeyEvent) -> Unit,
-    private val onDeleteBackward: () -> Unit
+    private val onDeleteBackward: () -> Unit,
+    private val onDeleteWord: () -> Unit
 ) {
 
     // ---------------------------------------------------------------------------
@@ -73,6 +74,7 @@ class FlutterChannelManager(
         // Method names – Flutter → Kotlin
         const val METHOD_COMMIT_KEY = "commitKey"
         const val METHOD_DELETE_BACKWARD = "deleteBackward"
+        const val METHOD_DELETE_WORD = "deleteWord"
         const val METHOD_COMMIT_SUGGESTION = "commitSuggestion"
         const val METHOD_SEND_KEY_CODE = "sendKeyCode"
     }
@@ -177,6 +179,14 @@ class FlutterChannelManager(
             METHOD_DELETE_BACKWARD -> {
                 onDeleteBackward()
                 suggestionManager.onCharacterAdded("\b").also { pushSuggestions(it) }
+                result.success(null)
+            }
+
+            METHOD_DELETE_WORD -> {
+                onDeleteWord()
+                // Reset the current token after a word deletion
+                suggestionManager.reset()
+                pushSuggestions(emptyList())
                 result.success(null)
             }
 

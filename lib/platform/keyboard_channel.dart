@@ -136,6 +136,14 @@ class KeyboardChannel {
   Future<void> deleteBackward() =>
       _keyInputChannel.invokeMethod<void>('deleteBackward');
 
+  /// Tells Kotlin to delete the entire word immediately before the cursor.
+  ///
+  /// The Kotlin side reads the text before the cursor, computes the previous
+  /// word boundary, and calls [InputConnection.deleteSurroundingText] with the
+  /// appropriate character count.
+  Future<void> deleteWord() =>
+      _keyInputChannel.invokeMethod<void>('deleteWord');
+
   /// Commits the selected [word] suggestion (Kotlin will append a space).
   Future<void> commitSuggestion(String word) =>
       _keyInputChannel.invokeMethod<void>('commitSuggestion', {'word': word});

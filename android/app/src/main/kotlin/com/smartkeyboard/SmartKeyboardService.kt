@@ -55,7 +55,8 @@ class SmartKeyboardService : InputMethodService() {
             suggestionManager = suggestionManager,
             onCommitText = { text -> currentInputConnection?.commitText(text, 1) },
             onSendKeyEvent = { keyCode -> currentInputConnection?.sendKeyEvent(keyCode) },
-            onDeleteBackward = { currentInputConnection?.deleteSurroundingText(1, 0) }
+            onDeleteBackward = { currentInputConnection?.deleteSurroundingText(1, 0) },
+            onDeleteWord = { deleteWordBeforeCursor() }
         )
 
         channelManager.setup()
@@ -113,5 +114,28 @@ class SmartKeyboardService : InputMethodService() {
             ?.getTextBeforeCursor(length, 0)
             ?.toString()
             ?: ""
+    }
+
+    /**
+     * Deletes the word immediately before the cursor.
+     *
+     * Reads up to 100 characters before the cursor, finds the previous word
+     * boundary (the last whitespace after trimming trailing spaces), then calls
+     * [InputConnection.deleteSurroundingText] to remove it in one operation.
+     */
+    private fun deleteWordBeforeCursor() {
+        val ic = currentInputConnection ?: return
+        val textBefore = ic.getTextBeforeCursor(100, 0)?.toString() ?: return
+        if (textBefore.isEmpty()) return
+
+        // Strip trailing whitespace first so swipe-left on "hello " deletes "hello".
+        val trimmed = textBefore.trimEnd()
+        val lastSpace = trimmed.lastIndexOf(' ')
+        // Delete only the word itself (not the preceding space separator) so the
+        // cursor lands naturally after the previous word.
+        // e.g. "hello world" → delete "world" (5) → "hello "
+        val wordLength = if (lastSpace >= 0) trimmed.length - lastSpace - 1 else trimmed.length
+        val trailingSpaces = textBefore.length - trimmed.length
+        ic.deleteSurroundingText(wordLength + trailingSpaces, 0)
     }
 }
