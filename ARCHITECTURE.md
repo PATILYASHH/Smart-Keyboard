@@ -157,7 +157,138 @@ channel.addSuggestionListener((suggestions) {
 
 ---
 
-## 5. Data Flow Between Flutter and Kotlin
+## 5. Input Processing Pipeline
+
+Every keystroke travels through a **five-stage pipeline** implemented in
+`lib/pipeline/input_pipeline.dart`.  Stages 1–4 run synchronously so the
+suggestion bar updates within the same UI frame; stage 5 (AI grammar
+improvement) is fire-and-forget asynchronous.
+
+### 5.1 Pipeline overview
+
+```
+User typing
+    │
+    ▼
+Stage 1 – Input buffer        (sync)
+    accumulate characters into a word buffer; rotate context buffers at
+    word boundaries (space / punctuation)
+    │
+    ▼
+Stage 2 – Spell correction    (sync, < 5 ms)
+    when currentWord.length >= 2 and SpellCorrector is attached:
+    Levenshtein-distance candidates from the bundled dictionary
+    │
+    ▼
+Stage 3 – Word prediction     (sync, < 2 ms)
+    when currentWord is empty and NgramPredictor is attached:
+    bigram / trigram next-word predictions from ngrams.json
+    │
+    ▼
+Stage 4 – Suggestion bar update  (sync, same frame)
+    merge spell + prediction results; call onSuggestions() immediately
+    │
+    ▼
+Stage 5 – AI grammar improvement  (async, optional)
+    fire-and-forget HTTP request via GrammarClient;
+    stale responses (superseded by newer input) are discarded via a
+    monotonically-increasing token; onGrammarCorrection() called on success
+```
+
+### 5.2 Pseudocode
+
+```
+process(character):
+  // Stage 1 – input buffer
+  sentenceBuffer.append(character)
+  if isWordChar(character):
+    wordBuffer.append(toLower(character))
+  else:
+    if wordBuffer is not empty:
+      previousPreviousWord = previousWord
+      previousWord = wordBuffer.flush()
+
+  // Stage 2 – spell correction (sync)
+  if wordBuffer.length >= 2 and spellCorrector != null:
+    spellSuggestions = spellCorrector.suggest(wordBuffer)
+  else:
+    spellSuggestions = []
+
+  // Stage 3 – word prediction (sync)
+  if wordBuffer is empty and ngramPredictor != null:
+    context = previousPreviousWord + " " + previousWord   // try trigram first
+    predictions = ngramPredictor.predict(context)
+    if predictions is empty:
+      predictions = ngramPredictor.predict(previousWord)  // bigram fallback
+  else:
+    predictions = []
+
+  // Stage 4 – instant suggestion bar update
+  suggestions = merge(spellSuggestions, predictions)
+  onSuggestions(suggestions)                              // synchronous
+
+  // Stage 5 – async AI grammar (fire-and-forget)
+  if grammarClient != null and onGrammarCorrection != null:
+    token = ++aiToken                                     // bump token
+    grammarClient.correct(sentenceBuffer)
+      .then((result) {
+        if aiToken == token:                              // still fresh?
+          onGrammarCorrection(result)
+      })
+      .catchError((_) {})                                // non-fatal
+```
+
+### 5.3 Dart implementation
+
+`InputPipeline` is the self-contained Dart class:
+
+```dart
+final pipeline = InputPipeline(
+  spellCorrector: await SpellCorrector.fromAsset(),
+  ngramPredictor: await NgramPredictor.fromAsset(),
+  grammarClient: GrammarClient(apiUrl: ..., apiKey: '...'),
+  onSuggestions: (suggestions) {
+    // Runs synchronously — update the suggestion bar immediately.
+    setState(() => _suggestions = suggestions);
+  },
+  onGrammarCorrection: (corrected) {
+    // Runs asynchronously — show the AI-corrected sentence.
+    setState(() => _grammarSuggestion = corrected);
+  },
+);
+
+// On every key press (UI thread):
+pipeline.process(character);
+
+// On backspace:
+pipeline.deleteLastChar();
+
+// On input field close:
+pipeline.reset();
+```
+
+`KeyboardChannel` owns an `InputPipeline` instance and rebuilds it via
+`_rebuildPipeline()` whenever a new component is attached (spell corrector,
+n-gram predictor, or grammar client).  The pipeline's `onSuggestions` callback
+writes directly into `KeyboardChannel._suggestions` and fires the existing
+`_suggestionListeners`, so the `SuggestionBar` widget requires no changes.
+
+### 5.4 Non-blocking guarantees
+
+| Stage | Execution model | Latency target |
+|-------|-----------------|----------------|
+| Input buffer | Synchronous | < 0.1 ms |
+| Spell correction | Synchronous (in-memory Levenshtein) | < 5 ms |
+| Word prediction | Synchronous (hash-map lookup) | < 1 ms |
+| Suggestion bar update | Synchronous callback | < 0.1 ms |
+| AI grammar improvement | `unawaited` Future; stale token discard | Network-bound |
+
+The UI thread is never blocked: stages 1–4 complete before the next
+`vsync` callback; stage 5 runs entirely off-frame.
+
+---
+
+## 6. Data Flow Between Flutter and Kotlin
 
 ### Key press (Flutter → Kotlin → InputConnection)
 
@@ -227,7 +358,7 @@ InputStateListeners notified → KeyboardWidget can switch layout
 
 ---
 
-## 6. Performance Considerations
+## 7. Performance Considerations
 
 | Concern | Strategy |
 |---------|----------|
@@ -243,7 +374,7 @@ InputStateListeners notified → KeyboardWidget can switch layout
 
 ---
 
-## Directory Tree (full)
+## 8. Directory Tree (full)
 
 ```
 Smart-Keyboard/
@@ -271,12 +402,27 @@ Smart-Keyboard/
 │   ├── main.dart
 │   ├── platform/
 │   │   └── keyboard_channel.dart
+│   ├── pipeline/
+│   │   └── input_pipeline.dart
+│   ├── spell/
+│   │   └── spell_corrector.dart
+│   ├── prediction/
+│   │   └── ngram_predictor.dart
+│   ├── grammar/
+│   │   └── grammar_client.dart
+│   ├── dictionary/
+│   │   └── personal_dictionary.dart
 │   └── keyboard/
 │       ├── keyboard_widget.dart
 │       ├── key_widget.dart
 │       └── suggestion_bar.dart
 ├── test/
-│   └── keyboard_channel_test.dart
+│   ├── input_pipeline_test.dart
+│   ├── keyboard_channel_test.dart
+│   ├── grammar_client_test.dart
+│   ├── ngram_predictor_test.dart
+│   ├── spell_corrector_test.dart
+│   └── personal_dictionary_test.dart
 ├── pubspec.yaml
 ├── analysis_options.yaml
 └── ARCHITECTURE.md
