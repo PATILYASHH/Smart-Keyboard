@@ -49,6 +49,18 @@ class _KeyboardAppState extends State<KeyboardApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A73E8)),
         useMaterial3: true,
       ),
+      // Dark theme: required by the "Dark mode UI" specification.
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1A73E8),
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      // Always use the dark theme — the keyboard runs inside an IME window
+      // where the host OS controls the surrounding UI chrome; forcing dark mode
+      // provides a consistent, battery-friendly appearance on OLED displays.
+      themeMode: ThemeMode.dark,
       home: KeyboardWidget(channel: _channel),
     );
   }

@@ -101,6 +101,13 @@ void main() {
     expect(keyInputCalls.first.method, equals('deleteBackward'));
   });
 
+  test('deleteWord invokes deleteWord method', () async {
+    await channel.deleteWord();
+
+    expect(keyInputCalls, hasLength(1));
+    expect(keyInputCalls.first.method, equals('deleteWord'));
+  });
+
   // ---------------------------------------------------------------------------
   // commitSuggestion
   // ---------------------------------------------------------------------------
