@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import '../dictionary/personal_dictionary.dart';
+import '../grammar/grammar_client.dart';
+import '../pipeline/input_pipeline.dart';
 import '../prediction/ngram_predictor.dart';
 import '../spell/spell_corrector.dart';
 
@@ -115,6 +117,7 @@ class KeyboardChannel {
   /// local ones so that server-side prediction takes precedence when online.
   void setSpellCorrector(SpellCorrector corrector) {
     _spellCorrector = corrector;
+    _rebuildPipeline();
   }
 
   // ---------------------------------------------------------------------------
@@ -131,6 +134,7 @@ class KeyboardChannel {
   /// ones.
   void setNgramPredictor(NgramPredictor predictor) {
     _ngramPredictor = predictor;
+    _rebuildPipeline();
   }
 
   // ---------------------------------------------------------------------------
@@ -150,6 +154,73 @@ class KeyboardChannel {
   ///   current prefix are prepended to any spell-correction suggestions.
   void setPersonalDictionary(PersonalDictionary dictionary) {
     _personalDictionary = dictionary;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Grammar client (AI stage)
+  // ---------------------------------------------------------------------------
+
+  /// The [GrammarClient] used for optional AI grammar improvement (stage 5 of
+  /// the input pipeline).
+  ///
+  /// Set via [setGrammarClient] after the keyboard is initialised.
+  /// When set, every [commitKey] call fires an asynchronous grammar-correction
+  /// request via [InputPipeline].  Stale responses (superseded by newer input)
+  /// are automatically discarded.  Registered [_grammarCorrectionListeners] are
+  /// notified when a fresh correction arrives.
+  GrammarClient? _grammarClient;
+
+  /// [InputPipeline] instance rebuilt whenever a spell-corrector, n-gram
+  /// predictor, or grammar client is attached.  `null` until at least one
+  /// component is set.
+  InputPipeline? _inputPipeline;
+
+  final List<void Function(String)> _grammarCorrectionListeners = [];
+
+  /// Attaches a [GrammarClient] for asynchronous AI grammar improvement.
+  ///
+  /// Each completed key press fires a fire-and-forget HTTP request to the
+  /// configured LLM API.  Results are delivered via [addGrammarCorrectionListener]
+  /// callbacks.  Stale responses (from earlier keystrokes) are discarded
+  /// automatically.
+  void setGrammarClient(GrammarClient client) {
+    _grammarClient = client;
+    _rebuildPipeline();
+  }
+
+  /// Registers a callback that is called asynchronously whenever the AI
+  /// grammar stage returns a corrected sentence.
+  void addGrammarCorrectionListener(void Function(String) listener) =>
+      _grammarCorrectionListeners.add(listener);
+
+  /// Removes a previously registered grammar correction listener.
+  void removeGrammarCorrectionListener(void Function(String) listener) =>
+      _grammarCorrectionListeners.remove(listener);
+
+  /// Rebuilds [_inputPipeline] with the currently-attached components.
+  ///
+  /// Called whenever a new component is attached so the pipeline always
+  /// reflects the latest configuration.
+  ///
+  /// Note: within [KeyboardChannel] the pipeline's [onSuggestions] callback is
+  /// intentionally a no-op because local suggestions (including personal-
+  /// dictionary hits) are already managed by [_computeAndApplySuggestions].
+  /// The pipeline is used exclusively for its AI grammar stage (stage 5).
+  void _rebuildPipeline() {
+    _inputPipeline = InputPipeline(
+      spellCorrector: _spellCorrector,
+      ngramPredictor: _ngramPredictor,
+      grammarClient: _grammarClient,
+      // Local suggestions are handled by _computeAndApplySuggestions which
+      // also integrates the personal dictionary.  The pipeline's onSuggestions
+      // callback is unused here to avoid double-notification.
+      onSuggestions: (_) {},
+      onGrammarCorrection: (corrected) {
+        for (final l in _grammarCorrectionListeners) {
+          l(corrected);
+        }
+      },
+    );
   }
 
   /// Returns the word currently being typed (empty between words).
@@ -245,6 +316,7 @@ class KeyboardChannel {
       _currentWord = _currentWord.substring(0, _currentWord.length - 1);
       _pushLocalSuggestions();
     }
+    _inputPipeline?.deleteLastChar();
     return _keyInputChannel.invokeMethod<void>('deleteBackward');
   }
 
@@ -324,6 +396,7 @@ class KeyboardChannel {
         _previousWord = '';
         _previousPreviousWord = '';
         _suggestions = const [];
+        _inputPipeline?.reset();
         for (final l in _inputStateListeners) {
           l(null);
         }
@@ -345,7 +418,8 @@ class KeyboardChannel {
   void _updateWordBuffer(String character) {
     if (_spellCorrector == null &&
         _ngramPredictor == null &&
-        _personalDictionary == null) return;
+        _personalDictionary == null &&
+        _grammarClient == null) return;
 
     if (character.isEmpty) return;
 
@@ -364,6 +438,12 @@ class KeyboardChannel {
       _currentWord += character.toLowerCase();
     }
     _pushLocalSuggestions();
+
+    // Delegate AI grammar improvement (stage 5) to the InputPipeline.
+    // The pipeline runs asynchronously and notifies _grammarCorrectionListeners
+    // when a fresh correction arrives; stale responses are discarded by the
+    // pipeline's token mechanism.
+    _inputPipeline?.process(character);
   }
 
   /// Computes offline suggestions and notifies [_suggestionListeners].
