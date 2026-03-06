@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import '../prediction/ngram_predictor.dart';
 import '../spell/spell_corrector.dart';
 
 /// Modifier key flags tracked by the keyboard UI.
@@ -70,8 +71,22 @@ class KeyboardChannel {
   /// When `null` the channel relies entirely on Kotlin-side suggestions.
   SpellCorrector? _spellCorrector;
 
+  /// The n-gram predictor used to generate context-aware word predictions.
+  ///
+  /// Set via [setNgramPredictor] after loading the model from assets.
+  /// When set, predictions are derived from the recent word context instead of
+  /// (or in addition to) spell-correction suggestions.  Kotlin-side suggestions
+  /// received via [_handleSuggestionsCall] always override local ones.
+  NgramPredictor? _ngramPredictor;
+
   /// The word currently being composed (updated on every [commitKey] call).
   String _currentWord = '';
+
+  /// The last committed word (updated when a word boundary is reached).
+  String _previousWord = '';
+
+  /// The word committed before [_previousWord] (used for trigram context).
+  String _previousPreviousWord = '';
 
   List<String> get suggestions => List.unmodifiable(_suggestions);
   InputFieldInfo? get currentField => _currentField;
@@ -92,10 +107,37 @@ class KeyboardChannel {
     _spellCorrector = corrector;
   }
 
+  // ---------------------------------------------------------------------------
+  // N-gram predictor
+  // ---------------------------------------------------------------------------
+
+  /// Attaches an [NgramPredictor] to this channel.
+  ///
+  /// Once set, [commitKey] will provide context-aware word predictions based
+  /// on the preceding word(s) whenever the user is between words (i.e. just
+  /// after typing a space or completing a word).  When [_currentWord] is
+  /// non-empty the spell corrector (if set) takes over.  Kotlin-side
+  /// suggestions received via [_handleSuggestionsCall] always override local
+  /// ones.
+  void setNgramPredictor(NgramPredictor predictor) {
+    _ngramPredictor = predictor;
+  }
+
   /// Returns the word currently being typed (empty between words).
   ///
   /// Exposed primarily for testing.
   String get currentWord => _currentWord;
+
+  /// Returns the last fully committed word (empty at the start of a session).
+  ///
+  /// Exposed primarily for testing.
+  String get previousWord => _previousWord;
+
+  /// Returns the word committed before [previousWord] (empty at session start).
+  ///
+  /// Together with [previousWord] this forms the two-word context used for
+  /// trigram lookups.  Exposed primarily for testing.
+  String get previousPreviousWord => _previousPreviousWord;
 
   // ---------------------------------------------------------------------------
   // Listeners
@@ -184,12 +226,16 @@ class KeyboardChannel {
   /// appropriate character count.
   Future<void> deleteWord() {
     _currentWord = '';
+    _previousWord = '';
+    _previousPreviousWord = '';
     _pushLocalSuggestions();
     return _keyInputChannel.invokeMethod<void>('deleteWord');
   }
 
   /// Commits the selected [word] suggestion (Kotlin will append a space).
   Future<void> commitSuggestion(String word) {
+    _previousPreviousWord = _previousWord;
+    _previousWord = word.toLowerCase();
     _currentWord = '';
     _pushLocalSuggestions();
     return _keyInputChannel.invokeMethod<void>('commitSuggestion', {'word': word});
@@ -243,6 +289,8 @@ class KeyboardChannel {
       case 'inputFinished':
         _currentField = null;
         _currentWord = '';
+        _previousWord = '';
+        _previousPreviousWord = '';
         _suggestions = const [];
         for (final l in _inputStateListeners) {
           l(null);
@@ -254,19 +302,26 @@ class KeyboardChannel {
   }
 
   // ---------------------------------------------------------------------------
-  // Word buffer + local spell correction
+  // Word buffer + local spell correction + n-gram prediction
   // ---------------------------------------------------------------------------
 
-  /// Updates [_currentWord] based on [character] and pushes offline
-  /// suggestions when a [SpellCorrector] is attached.
+  /// Updates [_currentWord] and [_previousWord] based on [character], then
+  /// pushes the best available offline suggestions.
+  ///
+  /// Called only when at least one of [_spellCorrector] or [_ngramPredictor]
+  /// is attached.
   void _updateWordBuffer(String character) {
-    if (_spellCorrector == null) return;
+    if (_spellCorrector == null && _ngramPredictor == null) return;
 
     if (character.isEmpty) return;
 
-    // Space, newline, or punctuation → word boundary: reset buffer.
+    // Space, newline, or punctuation → word boundary: rotate buffers.
     final isWordChar = RegExp(r"[a-zA-Z']").hasMatch(character);
     if (!isWordChar) {
+      if (_currentWord.isNotEmpty) {
+        _previousPreviousWord = _previousWord;
+        _previousWord = _currentWord;
+      }
       _currentWord = '';
     } else {
       _currentWord += character.toLowerCase();
@@ -274,18 +329,36 @@ class KeyboardChannel {
     _pushLocalSuggestions();
   }
 
-  /// Computes offline spell-correction suggestions for [_currentWord] and
-  /// notifies [_suggestionListeners].
+  /// Computes offline suggestions and notifies [_suggestionListeners].
   ///
-  /// Called only when [_spellCorrector] is set.  Kotlin-side suggestions
-  /// received via [_handleSuggestionsCall] will overwrite these.
+  /// Priority:
+  /// 1. **Spell correction** – when the user is mid-word (≥ 2 chars) and a
+  ///    [SpellCorrector] is attached.
+  /// 2. **N-gram prediction** – when the user is at a word boundary (current
+  ///    word is empty) and an [NgramPredictor] is attached.
+  ///
+  /// Kotlin-side suggestions received via [_handleSuggestionsCall] always
+  /// overwrite whatever is set here.
   void _pushLocalSuggestions() {
-    final corrector = _spellCorrector;
-    if (corrector == null) return;
+    List<String> newSuggestions = const [];
 
-    final word = _currentWord;
-    final newSuggestions =
-        word.length >= 2 ? corrector.suggest(word) : const <String>[];
+    final corrector = _spellCorrector;
+    final predictor = _ngramPredictor;
+
+    if (_currentWord.length >= 2 && corrector != null) {
+      // Mid-word: offer spell corrections.
+      newSuggestions = corrector.suggest(_currentWord);
+    } else if (_currentWord.isEmpty && predictor != null) {
+      // Between words: offer n-gram predictions.
+      // Pass the two most recent words so the predictor can try a trigram
+      // lookup first and fall back to a bigram when no trigram entry exists.
+      if (_previousPreviousWord.isNotEmpty && _previousWord.isNotEmpty) {
+        newSuggestions =
+            predictor.predict('$_previousPreviousWord $_previousWord');
+      } else if (_previousWord.isNotEmpty) {
+        newSuggestions = predictor.predict(_previousWord);
+      }
+    }
 
     _suggestions = newSuggestions;
     for (final l in _suggestionListeners) {

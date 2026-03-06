@@ -1,0 +1,284 @@
+{
+  "bigrams": {
+    "i": {
+      "am": 15,
+      "will": 10,
+      "can": 8,
+      "have": 7,
+      "think": 5
+    },
+    "will": {
+      "go": 12,
+      "come": 8,
+      "send": 5,
+      "be": 4,
+      "do": 3
+    },
+    "you": {
+      "can": 14,
+      "are": 11,
+      "will": 9,
+      "have": 7,
+      "should": 5
+    },
+    "we": {
+      "can": 10,
+      "will": 9,
+      "are": 7,
+      "should": 5,
+      "have": 4
+    },
+    "they": {
+      "are": 12,
+      "will": 9,
+      "have": 6,
+      "can": 5,
+      "do": 4
+    },
+    "it": {
+      "is": 20,
+      "was": 10,
+      "will": 8,
+      "can": 5,
+      "has": 4
+    },
+    "the": {
+      "best": 8,
+      "first": 7,
+      "new": 6,
+      "same": 5,
+      "only": 4
+    },
+    "he": {
+      "is": 13,
+      "was": 9,
+      "will": 7,
+      "has": 6,
+      "can": 4
+    },
+    "she": {
+      "is": 11,
+      "was": 8,
+      "will": 6,
+      "has": 5,
+      "can": 3
+    },
+    "please": {
+      "let": 7,
+      "send": 6,
+      "come": 5,
+      "tell": 4,
+      "help": 3
+    },
+    "thank": {
+      "you": 25,
+      "god": 4,
+      "him": 2
+    },
+    "good": {
+      "morning": 12,
+      "night": 10,
+      "luck": 8,
+      "work": 6,
+      "job": 5
+    },
+    "how": {
+      "are": 15,
+      "much": 8,
+      "can": 6,
+      "do": 5,
+      "long": 4
+    },
+    "what": {
+      "is": 14,
+      "are": 9,
+      "do": 7,
+      "can": 5,
+      "time": 4
+    },
+    "let": {
+      "me": 14,
+      "us": 10,
+      "him": 4,
+      "her": 3,
+      "them": 3
+    },
+    "do": {
+      "not": 18,
+      "you": 10,
+      "it": 7,
+      "we": 4,
+      "they": 3
+    },
+    "can": {
+      "you": 12,
+      "i": 9,
+      "we": 7,
+      "be": 5,
+      "do": 4
+    },
+    "have": {
+      "a": 12,
+      "been": 9,
+      "to": 7,
+      "you": 5,
+      "the": 4
+    },
+    "going": {
+      "to": 18,
+      "on": 7,
+      "back": 5,
+      "home": 4,
+      "out": 3
+    },
+    "be": {
+      "a": 10,
+      "the": 8,
+      "able": 7,
+      "there": 5,
+      "back": 4
+    }
+  },
+  "trigrams": {
+    "i will": {
+      "go": 7,
+      "come": 5,
+      "send": 3,
+      "be": 2,
+      "do": 1
+    },
+    "i am": {
+      "going": 8,
+      "not": 6,
+      "here": 4,
+      "happy": 3,
+      "sorry": 3
+    },
+    "i can": {
+      "do": 6,
+      "see": 5,
+      "help": 4,
+      "go": 3,
+      "come": 2
+    },
+    "i have": {
+      "a": 7,
+      "been": 5,
+      "to": 4,
+      "no": 3,
+      "the": 2
+    },
+    "you can": {
+      "do": 8,
+      "go": 6,
+      "see": 5,
+      "use": 4,
+      "find": 3
+    },
+    "you are": {
+      "right": 7,
+      "welcome": 6,
+      "the": 4,
+      "not": 3,
+      "a": 2
+    },
+    "you will": {
+      "be": 8,
+      "get": 5,
+      "find": 4,
+      "see": 3,
+      "have": 2
+    },
+    "we can": {
+      "do": 7,
+      "go": 5,
+      "use": 4,
+      "make": 3,
+      "see": 2
+    },
+    "we will": {
+      "be": 9,
+      "go": 6,
+      "see": 4,
+      "have": 3,
+      "do": 2
+    },
+    "how are": {
+      "you": 15,
+      "things": 5,
+      "we": 3,
+      "they": 2,
+      "the": 1
+    },
+    "what is": {
+      "the": 10,
+      "your": 7,
+      "this": 5,
+      "it": 4,
+      "happening": 2
+    },
+    "it is": {
+      "a": 12,
+      "the": 8,
+      "not": 6,
+      "very": 5,
+      "important": 3
+    },
+    "let me": {
+      "know": 12,
+      "check": 7,
+      "see": 6,
+      "think": 4,
+      "go": 3
+    },
+    "going to": {
+      "be": 10,
+      "the": 7,
+      "do": 5,
+      "get": 4,
+      "make": 3
+    },
+    "do not": {
+      "worry": 8,
+      "forget": 6,
+      "know": 5,
+      "have": 4,
+      "think": 3
+    },
+    "good morning": {
+      "everyone": 7,
+      "to": 5,
+      "and": 4,
+      "my": 3,
+      "all": 2
+    },
+    "thank you": {
+      "for": 15,
+      "so": 8,
+      "very": 7,
+      "all": 4,
+      "again": 3
+    },
+    "please let": {
+      "me": 10,
+      "us": 6,
+      "him": 2,
+      "her": 1,
+      "them": 1
+    },
+    "i think": {
+      "you": 8,
+      "we": 6,
+      "it": 5,
+      "so": 4,
+      "the": 2
+    },
+    "can you": {
+      "please": 9,
+      "help": 7,
+      "send": 5,
+      "tell": 4,
+      "come": 3
+    }
+  }
+}
