@@ -458,20 +458,21 @@ void main() {
         },
       );
 
-      // 'hai' is a Hinglish marker present after two characters → triggers.
-      pipeline.process('h'); // starts word 'h'
-      pipeline.process('a'); // 'ha' - not yet a Hinglish marker
-      // Force a word boundary so 'hai' is in the sentence buffer
-      // then immediately add new input to bump the token.
-      pipeline.process('i'); // 'hai' - Hinglish marker in buffer
-      pipeline.process(' '); // word boundary fires new token
+      // Type 'hai' one character at a time.  When 'i' is processed the sentence
+      // buffer reads "hai" which is a Hinglish marker, so the first (slow)
+      // translation request is dispatched with token 1.  The subsequent space
+      // triggers a second request with token 2, invalidating the first.
+      pipeline.process('h'); // sentence = "h"   – no Hinglish marker yet
+      pipeline.process('a'); // sentence = "ha"  – no Hinglish marker yet
+      pipeline.process('i'); // sentence = "hai" – Hinglish detected → request #1 (slow, token 1)
+      pipeline.process(' '); // sentence = "hai " – Hinglish detected → request #2 (fast, token 2)
 
       // Wait long enough for both responses to settle.
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
-      // Only the last (non-stale) response should have been delivered.
+      // Only the second (non-stale) response should have been delivered.
       expect(callCount, equals(1));
-      expect(results.single, equals('response-${requestCount}'));
+      expect(results.single, equals('response-2'));
 
       translator.close();
     });
