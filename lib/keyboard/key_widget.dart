@@ -7,8 +7,9 @@ import 'gesture_handler.dart';
 /// Design goals:
 /// • Renders in < 1 ms (no layout calculation, pre-baked [BoxDecoration]).
 /// • Plays a short scale animation on tap to give tactile-like feedback.
-/// • Notifies the parent via [onTap] so that all [InputConnection] writes
-///   happen in one place ([KeyboardWidget]).
+/// • Fires [onTap] **immediately** at the start of the press animation so the
+///   input pipeline sees the keystroke with minimal latency (no waiting for the
+///   animation to complete).
 class KeyWidget extends StatefulWidget {
   const KeyWidget({
     super.key,
@@ -75,10 +76,11 @@ class _KeyWidgetState extends State<KeyWidget>
     super.dispose();
   }
 
-  Future<void> _handleTap() async {
-    await _controller.forward();
-    await _controller.reverse();
+  /// Fires [onTap] immediately for minimal latency, then runs the press
+  /// animation in the background so the UI still shows tactile feedback.
+  void _handleTap() {
     widget.onTap(widget.character);
+    _controller.forward().then((_) => _controller.reverse());
   }
 
   @override
@@ -105,8 +107,9 @@ class _KeyWidgetState extends State<KeyWidget>
             scale: _scaleAnimation,
             child: Material(
               elevation: widget.isModifier ? 0 : 1,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(8),
               color: bg,
+              shadowColor: theme.colorScheme.shadow.withAlpha(80),
               child: SizedBox(
                 height: widget.height,
                 child: Center(
@@ -201,10 +204,10 @@ class _BackspaceKeyWidgetState extends State<BackspaceKeyWidget>
     super.dispose();
   }
 
-  Future<void> _handleTap() async {
-    await _controller.forward();
-    await _controller.reverse();
+  /// Fires the delete callback immediately and animates in the background.
+  void _handleTap() {
     widget.onDelete();
+    _controller.forward().then((_) => _controller.reverse());
   }
 
   @override
@@ -218,7 +221,7 @@ class _BackspaceKeyWidgetState extends State<BackspaceKeyWidget>
           onTap: _handleTap,
           child: Material(
             elevation: 0,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(8),
             color: theme.colorScheme.surfaceContainerHigh,
             child: SizedBox(
               height: widget.height,
@@ -259,7 +262,7 @@ class ShiftKeyWidget extends StatelessWidget {
           onTap: onTap,
           child: Material(
             elevation: 0,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(8),
             color: isActive
                 ? theme.colorScheme.primary
                 : theme.colorScheme.surfaceContainerHigh,
@@ -314,7 +317,7 @@ class EmojiKeyWidget extends StatelessWidget {
           onTap: onTap,
           child: Material(
             elevation: 0,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(8),
             color: isActive
                 ? theme.colorScheme.primary
                 : theme.colorScheme.surfaceContainerHigh,
@@ -393,10 +396,11 @@ class _SpacebarKeyWidgetState extends State<SpacebarKeyWidget>
     super.dispose();
   }
 
-  Future<void> _handleTap() async {
-    await _controller.forward();
-    await _controller.reverse();
+  /// Fires [onTap] immediately for minimal latency, then animates in the
+  /// background.
+  void _handleTap() {
     widget.onTap(' ');
+    _controller.forward().then((_) => _controller.reverse());
   }
 
   @override
@@ -418,8 +422,9 @@ class _SpacebarKeyWidgetState extends State<SpacebarKeyWidget>
               scale: _scaleAnimation,
               child: Material(
                 elevation: 1,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(8),
                 color: bg,
+                shadowColor: theme.colorScheme.shadow.withAlpha(80),
                 child: SizedBox(
                   height: widget.height,
                   child: Center(

@@ -7,8 +7,10 @@ import '../platform/keyboard_channel.dart';
 /// [SuggestionManager].  Tapping a chip calls [onSuggestionSelected] which
 /// triggers [KeyboardChannel.commitSuggestion].
 ///
-/// The bar uses an [AnimatedSwitcher] to cross-fade whenever the suggestion
-/// list changes, keeping visual noise low during fast typing.
+/// Each suggestion is rendered as a pill-shaped chip, matching the compact
+/// Samsung Keyboard style.  The bar uses an [AnimatedSwitcher] to cross-fade
+/// whenever the suggestion list changes, keeping visual noise low during fast
+/// typing.
 class SuggestionBar extends StatefulWidget {
   const SuggestionBar({
     super.key,
@@ -59,36 +61,45 @@ class _SuggestionBarState extends State<SuggestionBar> {
   }
 
   Widget _buildChipRow(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final chipBg = isDark
+        ? theme.colorScheme.surfaceContainerHigh
+        : theme.colorScheme.surfaceContainer;
+
     return Row(
       key: ValueKey(_suggestions.join()),
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        for (int i = 0; i < _suggestions.length; i++) ...[
-          if (i > 0)
-            VerticalDivider(
-              width: 1,
-              thickness: 1,
-              indent: 10,
-              endIndent: 10,
-              color: theme.colorScheme.outlineVariant,
-            ),
+        for (int i = 0; i < _suggestions.length; i++)
           Expanded(
-            child: InkWell(
-              onTap: () => widget.channel.commitSuggestion(_suggestions[i]),
-              child: Center(
-                child: Text(
-                  _suggestions[i],
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w400,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Material(
+                color: chipBg,
+                borderRadius: BorderRadius.circular(16),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => widget.channel.commitSuggestion(_suggestions[i]),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    child: Center(
+                      child: Text(
+                        _suggestions[i],
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
           ),
-        ],
       ],
     );
   }

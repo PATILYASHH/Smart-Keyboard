@@ -67,10 +67,9 @@ class _KeyboardAppState extends State<KeyboardApp> {
         ),
         useMaterial3: true,
       ),
-      // Always use the dark theme — the keyboard runs inside an IME window
-      // where the host OS controls the surrounding UI chrome; forcing dark mode
-      // provides a consistent, battery-friendly appearance on OLED displays.
-      themeMode: ThemeMode.dark,
+      // Follow the host OS theme so the keyboard blends with the surrounding
+      // application chrome in both light and dark mode.
+      themeMode: ThemeMode.system,
       home: KeyboardWidget(channel: _channel),
     );
   }
