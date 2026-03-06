@@ -3,6 +3,7 @@ import 'dart:async';
 import '../grammar/grammar_client.dart';
 import '../prediction/ngram_predictor.dart';
 import '../spell/spell_corrector.dart';
+import '../translation/hinglish_translator.dart';
 
 /// Called synchronously within [InputPipeline.process] whenever the local
 /// suggestion list changes (stages 2–4 of the pipeline).
@@ -11,7 +12,11 @@ typedef SuggestionCallback = void Function(List<String> suggestions);
 /// Called asynchronously after the AI grammar stage completes (stage 5).
 typedef GrammarCorrectionCallback = void Function(String corrected);
 
-/// Processes every user keystroke through a five-stage pipeline:
+/// Called asynchronously after the Hinglish translation stage completes
+/// (stage 6).
+typedef TranslationCallback = void Function(String translated);
+
+/// Processes every user keystroke through a six-stage pipeline:
 ///
 /// ```
 /// User typing
@@ -26,6 +31,10 @@ typedef GrammarCorrectionCallback = void Function(String corrected);
 ///     ↓
 /// Stage 5 – AI grammar improvement (async, optional)
 ///            fire-and-forget via [onGrammarCorrection]; stale results discarded
+///     ↓
+/// Stage 6 – Hinglish translation (async, optional)
+///            detects mixed Hindi-English; translates to natural English via AI;
+///            fire-and-forget via [onTranslation]; stale results discarded
 /// ```
 ///
 /// Design goals
@@ -67,6 +76,13 @@ typedef GrammarCorrectionCallback = void Function(String corrected);
 ///     grammarClient.correct(sentenceBuffer)
 ///       .then((result) { if currentToken == token: onGrammarCorrection(result) })
 ///       .catchError((_) {})                     // non-fatal
+///
+///   // Stage 6 – optional Hinglish translation (async, fire-and-forget)
+///   if hinglishTranslator != null and onTranslation != null:
+///     token = nextTranslationToken()
+///     hinglishTranslator.translate(sentenceBuffer)
+///       .then((result) { if currentTranslationToken == token: onTranslation(result) })
+///       .catchError((_) {})                     // non-fatal
 /// ```
 ///
 /// Usage
@@ -79,8 +95,10 @@ typedef GrammarCorrectionCallback = void Function(String corrected);
 ///     'trigrams': {},
 ///   }),
 ///   grammarClient: GrammarClient(apiUrl: ..., apiKey: '...'),
+///   hinglishTranslator: HinglishTranslator(apiUrl: ..., apiKey: '...'),
 ///   onSuggestions: (suggestions) => setState(() => _suggestions = suggestions),
 ///   onGrammarCorrection: (corrected) => setState(() => _corrected = corrected),
+///   onTranslation: (translated) => setState(() => _translated = translated),
 /// );
 ///
 /// // On every key press:
@@ -100,23 +118,31 @@ class InputPipeline {
   /// * [spellCorrector] – optional offline spell-correction engine (stage 2).
   /// * [ngramPredictor] – optional n-gram word predictor (stage 3).
   /// * [grammarClient]  – optional AI grammar client (stage 5).
+  /// * [hinglishTranslator] – optional Hinglish-to-English translation client
+  ///   (stage 6).
   /// * [onSuggestions]  – **required** callback invoked synchronously in
   ///   [process] whenever local suggestions change (stages 2–4).
   /// * [onGrammarCorrection] – optional callback invoked asynchronously when
   ///   the AI grammar stage returns a result (stage 5).
+  /// * [onTranslation] – optional callback invoked asynchronously when the
+  ///   Hinglish translation stage returns a result (stage 6).
   InputPipeline({
     SpellCorrector? spellCorrector,
     NgramPredictor? ngramPredictor,
     GrammarClient? grammarClient,
+    HinglishTranslator? hinglishTranslator,
     required this.onSuggestions,
     this.onGrammarCorrection,
+    this.onTranslation,
   })  : _spellCorrector = spellCorrector,
         _ngramPredictor = ngramPredictor,
-        _grammarClient = grammarClient;
+        _grammarClient = grammarClient,
+        _hinglishTranslator = hinglishTranslator;
 
   final SpellCorrector? _spellCorrector;
   final NgramPredictor? _ngramPredictor;
   final GrammarClient? _grammarClient;
+  final HinglishTranslator? _hinglishTranslator;
 
   // ---------------------------------------------------------------------------
   // Output callbacks
@@ -129,6 +155,10 @@ class InputPipeline {
   /// Called asynchronously when the AI grammar correction stage returns a
   /// result (stage 5).  May be `null` if AI grammar is disabled.
   final GrammarCorrectionCallback? onGrammarCorrection;
+
+  /// Called asynchronously when the Hinglish translation stage returns a
+  /// result (stage 6).  May be `null` if Hinglish translation is disabled.
+  final TranslationCallback? onTranslation;
 
   // ---------------------------------------------------------------------------
   // Internal buffer state
@@ -153,6 +183,11 @@ class InputPipeline {
   /// [_aiToken]; if they differ the response is silently discarded.
   int _aiToken = 0;
 
+  /// Monotonically-increasing token for stale Hinglish-translation detection.
+  ///
+  /// Works identically to [_aiToken] but scoped to the translation stage.
+  int _translationToken = 0;
+
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
@@ -172,6 +207,9 @@ class InputPipeline {
 
     // Stage 5: fire optional AI grammar correction asynchronously.
     _triggerAiGrammar();
+
+    // Stage 6: fire optional Hinglish translation asynchronously.
+    _triggerHinglishTranslation();
   }
 
   /// Handles a backspace: removes the last character from the word buffer and
@@ -204,6 +242,7 @@ class InputPipeline {
     _previousWord = '';
     _previousPreviousWord = '';
     _aiToken++; // invalidate any in-flight AI request
+    _translationToken++; // invalidate any in-flight translation request
     onSuggestions(const []);
   }
 
@@ -291,6 +330,33 @@ class InputPipeline {
         }
       }).catchError((_) {
         // AI errors are non-fatal; the suggestion bar retains its last value.
+      }),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stage 6: Optional Hinglish-to-English translation
+  // ---------------------------------------------------------------------------
+
+  void _triggerHinglishTranslation() {
+    final translator = _hinglishTranslator;
+    final callback = onTranslation;
+    if (translator == null || callback == null) return;
+
+    final sentence = _sentenceBuffer.toString().trim();
+    if (sentence.isEmpty) return;
+
+    // Bump the token so any previous in-flight response is invalidated.
+    final token = ++_translationToken;
+
+    unawaited(
+      translator.translate(sentence).then((translated) {
+        // Only deliver the result if it has not been superseded.
+        if (_translationToken == token) {
+          callback(translated);
+        }
+      }).catchError((_) {
+        // Translation errors are non-fatal; the UI retains its last value.
       }),
     );
   }
