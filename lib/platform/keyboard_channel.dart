@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
+import '../dictionary/personal_dictionary.dart';
 import '../prediction/ngram_predictor.dart';
 import '../spell/spell_corrector.dart';
 
@@ -79,6 +82,13 @@ class KeyboardChannel {
   /// received via [_handleSuggestionsCall] always override local ones.
   NgramPredictor? _ngramPredictor;
 
+  /// The personal dictionary used to:
+  /// * suppress autocorrect for words the user has previously typed, and
+  /// * surface those words as suggestions ranked by frequency.
+  ///
+  /// Set via [setPersonalDictionary].
+  PersonalDictionary? _personalDictionary;
+
   /// The word currently being composed (updated on every [commitKey] call).
   String _currentWord = '';
 
@@ -121,6 +131,25 @@ class KeyboardChannel {
   /// ones.
   void setNgramPredictor(NgramPredictor predictor) {
     _ngramPredictor = predictor;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Personal dictionary
+  // ---------------------------------------------------------------------------
+
+  /// Attaches a [PersonalDictionary] to this channel.
+  ///
+  /// Once set:
+  /// * Every completed word (at a word boundary) is recorded via
+  ///   [PersonalDictionary.saveWord] so that it is remembered for future
+  ///   sessions.
+  /// * [_pushLocalSuggestions] checks the dictionary first and suppresses
+  ///   spell-correction candidates that are already known words (so the user's
+  ///   intentional vocabulary is never "corrected away").
+  /// * When mid-word, personal-dictionary suggestions that start with the
+  ///   current prefix are prepended to any spell-correction suggestions.
+  void setPersonalDictionary(PersonalDictionary dictionary) {
+    _personalDictionary = dictionary;
   }
 
   /// Returns the word currently being typed (empty between words).
@@ -237,6 +266,9 @@ class KeyboardChannel {
     _previousPreviousWord = _previousWord;
     _previousWord = word.toLowerCase();
     _currentWord = '';
+    // Record the chosen word so it is remembered for future sessions.
+    // Fire-and-forget: saving to disk must not block the UI thread.
+    unawaited(_personalDictionary?.saveWord(word) ?? Future.value());
     _pushLocalSuggestions();
     return _keyInputChannel.invokeMethod<void>('commitSuggestion', {'word': word});
   }
@@ -308,10 +340,12 @@ class KeyboardChannel {
   /// Updates [_currentWord] and [_previousWord] based on [character], then
   /// pushes the best available offline suggestions.
   ///
-  /// Called only when at least one of [_spellCorrector] or [_ngramPredictor]
-  /// is attached.
+  /// Called only when at least one of [_spellCorrector], [_ngramPredictor], or
+  /// [_personalDictionary] is attached.
   void _updateWordBuffer(String character) {
-    if (_spellCorrector == null && _ngramPredictor == null) return;
+    if (_spellCorrector == null &&
+        _ngramPredictor == null &&
+        _personalDictionary == null) return;
 
     if (character.isEmpty) return;
 
@@ -321,6 +355,9 @@ class KeyboardChannel {
       if (_currentWord.isNotEmpty) {
         _previousPreviousWord = _previousWord;
         _previousWord = _currentWord;
+        // Persist the completed word to the personal dictionary.
+        // Fire-and-forget: saving to disk must not block the UI thread.
+        unawaited(_personalDictionary?.saveWord(_currentWord) ?? Future.value());
       }
       _currentWord = '';
     } else {
@@ -331,23 +368,56 @@ class KeyboardChannel {
 
   /// Computes offline suggestions and notifies [_suggestionListeners].
   ///
-  /// Priority:
-  /// 1. **Spell correction** – when the user is mid-word (≥ 2 chars) and a
-  ///    [SpellCorrector] is attached.
-  /// 2. **N-gram prediction** – when the user is at a word boundary (current
-  ///    word is empty) and an [NgramPredictor] is attached.
+  /// Priority (mid-word, i.e. [_currentWord] has ≥ 2 characters):
+  /// 1. **Personal-dictionary prefix matches** – words the user has previously
+  ///    typed that start with the current prefix, ranked by frequency.
+  /// 2. **Spell corrections** – candidates from [SpellCorrector] that are *not*
+  ///    already in the personal dictionary (saved words are never autocorrected).
+  ///
+  /// Priority (between words, i.e. [_currentWord] is empty):
+  /// 1. **N-gram prediction** – context-aware word predictions from
+  ///    [NgramPredictor] based on the preceding word(s).
   ///
   /// Kotlin-side suggestions received via [_handleSuggestionsCall] always
   /// overwrite whatever is set here.
   void _pushLocalSuggestions() {
+    // Personal-dictionary calls are async; schedule and return to avoid
+    // blocking the UI.  When the future completes it will call
+    // _applySuggestions which notifies listeners.
+    _computeAndApplySuggestions();
+  }
+
+  Future<void> _computeAndApplySuggestions() async {
     List<String> newSuggestions = const [];
 
     final corrector = _spellCorrector;
     final predictor = _ngramPredictor;
+    final dict = _personalDictionary;
 
-    if (_currentWord.length >= 2 && corrector != null) {
-      // Mid-word: offer spell corrections.
-      newSuggestions = corrector.suggest(_currentWord);
+    if (_currentWord.length >= 2) {
+      // Mid-word: personal-dictionary prefix hits first, then spell correction
+      // (excluding words already in the personal dictionary).
+      final personalHits = dict != null
+          ? await dict.getSuggestions(_currentWord)
+          : <String>[];
+
+      if (corrector != null) {
+        final spellHits = corrector.suggest(_currentWord);
+        // Batch-check which spell candidates are in the personal dictionary so
+        // that a single SQL round-trip replaces N individual queries.
+        final knownWords =
+            dict != null ? await dict.containsAny(spellHits) : const <String>{};
+        // Filter out candidates the user typed intentionally.
+        final filtered =
+            spellHits.where((w) => !knownWords.contains(w)).toList();
+
+        // Merge using a Set for O(1) duplicate detection.
+        final merged = <String>{...personalHits};
+        merged.addAll(filtered);
+        newSuggestions = merged.toList();
+      } else {
+        newSuggestions = personalHits;
+      }
     } else if (_currentWord.isEmpty && predictor != null) {
       // Between words: offer n-gram predictions.
       // Pass the two most recent words so the predictor can try a trigram
