@@ -150,11 +150,11 @@ class NgramPredictor {
   /// ```
   static Map<String, Map<String, int>> _parseTable(dynamic raw) {
     if (raw == null) return const {};
-    final outer = raw as Map<String, dynamic>;
+    final outer = Map<String, dynamic>.from(raw as Map);
     return {
       for (final entry in outer.entries)
         entry.key.trim().toLowerCase(): {
-          for (final inner in (entry.value as Map<String, dynamic>).entries)
+          for (final inner in Map<String, dynamic>.from(entry.value as Map).entries)
             inner.key.trim().toLowerCase(): (inner.value as num).toInt(),
         },
     };
