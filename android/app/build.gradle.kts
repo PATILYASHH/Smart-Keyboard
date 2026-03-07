@@ -23,8 +23,12 @@ android {
         applicationId = "com.smartkeyboard"
         minSdk = 24
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+
+        val flutterVersionCode = project.findProperty("flutter.versionCode")?.toString()
+        val flutterVersionName = project.findProperty("flutter.versionName")?.toString()
+
+        versionCode = flutterVersionCode?.toInt() ?: 1
+        versionName = flutterVersionName ?: "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
