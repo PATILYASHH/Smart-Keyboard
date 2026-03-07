@@ -35,11 +35,11 @@ class KeyboardEngine {
 
         return when (character) {
             "\n", "\r" -> KeyInputResult.SendKeyEvent(
-                KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)
+                KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER, 0)
             )
             "\b" -> KeyInputResult.DeleteBackward
             "\t" -> KeyInputResult.SendKeyEvent(
-                KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB)
+                KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB, 0)
             )
             else -> KeyInputResult.CommitText(character)
         }
@@ -53,7 +53,7 @@ class KeyboardEngine {
         return when (keyCode) {
             KeyEvent.KEYCODE_DEL -> KeyInputResult.DeleteBackward
             KeyEvent.KEYCODE_ENTER -> KeyInputResult.SendKeyEvent(
-                KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)
+                KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER, 0)
             )
             KeyEvent.KEYCODE_SPACE -> KeyInputResult.CommitText(" ")
             else -> {

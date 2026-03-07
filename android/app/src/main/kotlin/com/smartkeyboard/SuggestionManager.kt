@@ -74,7 +74,11 @@ class SuggestionManager {
                 if (currentToken.isNotEmpty()) {
                     currentToken = currentToken.dropLast(1)
                 }
-                computeSuggestions(currentToken, maxSuggestions)
+                if (currentToken.isEmpty()) {
+                    emptyList()
+                } else {
+                    computeSuggestions(currentToken, maxSuggestions)
+                }
             }
             else -> {
                 currentToken += character.lowercase()

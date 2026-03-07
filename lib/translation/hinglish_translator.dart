@@ -77,7 +77,7 @@ class HinglishTranslator {
   static const int defaultMaxRetries = 3;
 
   /// Delay before the first retry.  Subsequent retries double this value.
-  static const Duration _initialRetryDelay = Duration(milliseconds: 500);
+  final Duration _initialRetryDelay;
 
   // Matches any character in the Devanagari Unicode block (U+0900–U+097F).
   static final RegExp _devanagariPattern = RegExp(r'[\u0900-\u097F]');
@@ -88,12 +88,12 @@ class HinglishTranslator {
   /// and everyday vocabulary that native Hinglish typists routinely mix in.
   static const Set<String> _hinglishMarkers = {
     // Pronouns
-    'main', 'mein', 'tu', 'tum', 'aap', 'hum', 'woh', 'yeh',
+    'tu', 'tum', 'aap', 'hum', 'woh', 'yeh',
     // Common verb stems / forms
     'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'honge',
     'raha', 'rahi', 'rahe', 'aana', 'jana', 'karna', 'lena', 'dena',
     'aunga', 'aaunga', 'jaunga', 'karunga',
-    'karo', 'karna', 'bol', 'bolo', 'sun', 'suno', 'dekh', 'dekho',
+    'karo', 'bol', 'bolo', 'sun', 'suno', 'dekh', 'dekho',
     // Question words
     'kya', 'kaise', 'kab', 'kahan', 'kidhar', 'kyun', 'kaun',
     // Quantifiers / adjectives
@@ -104,7 +104,7 @@ class HinglishTranslator {
     'lekin', 'par', 'magar', 'kyunki', 'isliye',
     // Postpositions
     'ko', 'ka', 'ki', 'ke', 'se', 'pe', 'tak', 'liye', 'saath',
-    'bin', 'bina', 'mein',
+    'bin', 'bina',
     // Time words
     'kal', 'aaj', 'abhi', 'parso', 'subah', 'shaam', 'raat',
     // Address / kinship terms
@@ -138,12 +138,14 @@ class HinglishTranslator {
     int maxRetries = defaultMaxRetries,
     Duration timeout = defaultTimeout,
     http.Client? httpClient,
+    Duration initialRetryDelay = const Duration(milliseconds: 500),
   })  : _apiUrl = apiUrl,
         _apiKey = apiKey,
         _model = model,
         _maxRetries = maxRetries,
         _timeout = timeout,
-        _httpClient = httpClient ?? http.Client();
+        _httpClient = httpClient ?? http.Client(),
+        _initialRetryDelay = initialRetryDelay;
 
   final Uri _apiUrl;
   final String _apiKey;
@@ -165,7 +167,7 @@ class HinglishTranslator {
   bool isHinglish(String text) {
     if (_devanagariPattern.hasMatch(text)) return true;
     final words = text.toLowerCase().split(RegExp(r'\s+'));
-    return words.any(_hinglishMarkers.contains);
+    return words.any((w) => _hinglishMarkers.contains(w));
   }
 
   /// Translates [text] from Hinglish to natural English.
